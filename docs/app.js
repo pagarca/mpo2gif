@@ -4,23 +4,34 @@ class MPOParser {
         const frames = [];
         
         let pos = 0;
-        let firstSOI = -1;
+        const frameStarts = [];
         
         while (pos < data.length - 1) {
             if (data[pos] === 0xFF && data[pos + 1] === 0xD8) {
-                if (firstSOI === -1) {
-                    firstSOI = pos;
-                } else {
-                    const frameData = data.slice(firstSOI, pos);
-                    frames.push(new Blob([frameData], { type: 'image/jpeg' }));
-                    firstSOI = pos;
-                }
+                frameStarts.push(pos);
             }
             pos++;
         }
         
-        if (firstSOI !== -1) {
-            const frameData = data.slice(firstSOI);
+        if (frameStarts.length < 2) {
+            return frames;
+        }
+        
+        const frameInfos = [];
+        for (let i = 0; i < frameStarts.length; i++) {
+            const start = frameStarts[i];
+            const end = (i < frameStarts.length - 1) ? frameStarts[i + 1] : data.length;
+            const size = end - start;
+            frameInfos.push({ start, end, size, index: i });
+        }
+        
+        frameInfos.sort((a, b) => b.size - a.size);
+        
+        const largestTwo = frameInfos.slice(0, 2);
+        largestTwo.sort((a, b) => a.start - b.start);
+        
+        for (const info of largestTwo) {
+            const frameData = data.slice(info.start, info.end);
             frames.push(new Blob([frameData], { type: 'image/jpeg' }));
         }
         
