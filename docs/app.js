@@ -44,17 +44,23 @@ class StereoProcessor {
         this.cvReady = false;
     }
 
-    async waitForOpenCV(timeout = 30000) {
+    async waitForOpenCV(timeout = 60000) {
         if (this.cvReady) return true;
-        
-        const startTime = Date.now();
-        while (!window.cv || !window.cv.Mat) {
-            if (Date.now() - startTime > timeout) {
-                throw new Error('OpenCV.js load timeout');
-            }
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        this.cvReady = true;
+
+        await new Promise((resolve, reject) => {
+            const deadline = Date.now() + timeout;
+            const check = () => {
+                if (window.cv && cv.Mat) {
+                    this.cvReady = true;
+                    resolve();
+                } else if (Date.now() > deadline) {
+                    reject(new Error('OpenCV.js load timeout'));
+                } else {
+                    setTimeout(check, 100);
+                }
+            };
+            check();
+        });
         return true;
     }
 
@@ -71,7 +77,7 @@ class StereoProcessor {
         cv.cvtColor(leftMat, leftGray, cv.COLOR_RGBA2GRAY);
         cv.cvtColor(rightMat, rightGray, cv.COLOR_RGBA2GRAY);
         
-        const orb = cv.ORB_create(2000);
+        const orb = new cv.ORB(2000);
         const kp1 = new cv.KeyPointVector();
         const kp2 = new cv.KeyPointVector();
         const des1 = new cv.Mat();
@@ -92,7 +98,7 @@ class StereoProcessor {
             return 0;
         }
         
-        const bf = new cv.BFMatcher(cv.NORM_HAMMING, true);
+        const bf = new cv.DescriptorMatcher('BruteForce-Hamming');
         const matches = new cv.DMatchVector();
         bf.match(des1, des2, matches);
         
@@ -142,7 +148,7 @@ class GIFGenerator {
         return new Promise((resolve, reject) => {
             const gif = new GIF({
                 workers: 2,
-                workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js',
+                workerScript: 'gif.worker.js',
                 quality: 10,
             });
             

@@ -13,3 +13,7 @@ env/
 !examples/
 .DS_Store
 Thumbs.db
+node_modules/
+package.json
+package-lock.json
+test-screenshot*.png
