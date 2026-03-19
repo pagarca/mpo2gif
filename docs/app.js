@@ -44,15 +44,15 @@ class StereoProcessor {
         this.cvReady = false;
     }
 
-    async waitForOpenCV(timeout = 30000) {
+    async waitForOpenCV(timeout = 60000) {
         if (this.cvReady) return true;
         
         const startTime = Date.now();
-        while (!window.cv || !window.cv.Mat) {
+        while (!window.cv || !window.cv.ORB_create) {
             if (Date.now() - startTime > timeout) {
                 throw new Error('OpenCV.js load timeout');
             }
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
         this.cvReady = true;
         return true;
