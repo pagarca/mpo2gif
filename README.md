@@ -24,37 +24,57 @@ You also need **ffmpeg** installed and available in your PATH (only required for
 
 ## Usage
 
-### Single file
+### GUI (recommended)
+
+The interactive GUI lets you visually select a **focal point** to control exactly where the wiggle effect is anchored. Click on the left image and the matching point is found automatically using template matching.
+
+```bash
+python mpo2gif_gui.py                          # Opens with file picker
+python mpo2gif_gui.py /path/to/photo.MPO       # Open a specific file
+python mpo2gif_gui.py /path/to/3ds/photos      # Open directory with prev/next navigation
+```
+
+Features:
+- **Focal point selection** — click on the left image, auto-matches on the right
+- **Rotation controls** — rotate 90° CW, 90° CCW, 180° for portrait photos
+- **Live preview** — animated wiggle preview with adjustable speed slider (50–500ms)
+- **Crop borders** — checkbox to remove glitchy edge padding caused by alignment
+- **Batch navigation** — prev/next buttons to process multiple MPO files
+- **Save GIF/MP4** — export with focal-point-aligned frames
+
+### CLI
+
+#### Single file
 
 ```bash
 python mpo2gif.py -i /path/to/photo.MPO
 ```
 
-### All files in a directory (auto-crop, GIF only)
+#### All files in a directory (auto-crop, GIF only)
 
 ```bash
 python mpo2gif.py -i /path/to/3ds/photos
 ```
 
-### GIF + MP4
+#### GIF + MP4
 
 ```bash
 python mpo2gif.py -i /path/to/3ds/photos --mp4
 ```
 
-### Custom output directory
+#### Custom output directory
 
 ```bash
 python mpo2gif.py -i /path/to/3ds/photos -o /path/to/output
 ```
 
-### Manual crop offset
+#### Manual crop offset
 
 ```bash
 python mpo2gif.py -i photo.MPO -c 80
 ```
 
-### All options
+#### All options
 
 ```
 usage: mpo2gif.py [-h] [-i INPUT] [-o OUTPUT_DIR] [-c CROP] [-d DURATION]
