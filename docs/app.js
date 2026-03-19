@@ -10,6 +10,11 @@ class MPOParser {
             boundaries.push(pos);
             pos = MPOParser._skipFrame(data, pos + 2);
             if (pos < 0) break;
+
+            while (pos < data.length - 1) {
+                if (data[pos] === 0xFF && data[pos + 1] === 0xD8) break;
+                pos++;
+            }
         }
 
         if (boundaries.length < 2) return [];
