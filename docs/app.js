@@ -1,41 +1,94 @@
 class MPOParser {
     static parse(arrayBuffer) {
         const data = new Uint8Array(arrayBuffer);
-        const frames = [];
-        
+        const boundaries = [];
+
         let pos = 0;
-        const frameStarts = [];
-        
         while (pos < data.length - 1) {
-            if (data[pos] === 0xFF && data[pos + 1] === 0xD8) {
-                frameStarts.push(pos);
-            }
-            pos++;
+            if (data[pos] !== 0xFF || data[pos + 1] !== 0xD8) break;
+
+            boundaries.push(pos);
+            pos = MPOParser._skipFrame(data, pos + 2);
+            if (pos < 0) break;
         }
-        
-        if (frameStarts.length < 2) {
-            return frames;
-        }
-        
+
+        if (boundaries.length < 2) return [];
+
         const frameInfos = [];
-        for (let i = 0; i < frameStarts.length; i++) {
-            const start = frameStarts[i];
-            const end = (i < frameStarts.length - 1) ? frameStarts[i + 1] : data.length;
-            const size = end - start;
-            frameInfos.push({ start, end, size, index: i });
+        for (let i = 0; i < boundaries.length; i++) {
+            const start = boundaries[i];
+            const end = (i < boundaries.length - 1) ? boundaries[i + 1] : data.length;
+            frameInfos.push({ start, end, size: end - start });
         }
-        
+
         frameInfos.sort((a, b) => b.size - a.size);
-        
         const largestTwo = frameInfos.slice(0, 2);
         largestTwo.sort((a, b) => a.start - b.start);
-        
+
+        const frames = [];
         for (const info of largestTwo) {
             const frameData = data.slice(info.start, info.end);
             frames.push(new Blob([frameData], { type: 'image/jpeg' }));
         }
-        
+
         return frames;
+    }
+
+    static _skipFrame(data, pos) {
+        while (pos < data.length - 1) {
+            if (data[pos] !== 0xFF) return pos;
+
+            const marker = data[pos + 1];
+
+            if (marker === 0xD8 || marker === 0x00) {
+                pos++;
+                continue;
+            }
+
+            if (marker === 0xD9) return pos + 2;
+
+            if (marker === 0xDA) {
+                pos += 2;
+                const segLen = (data[pos] << 8) | data[pos + 1];
+                pos += segLen;
+                return MPOParser._skipEntropy(data, pos);
+            }
+
+            if (marker >= 0xD0 && marker <= 0xD7) {
+                pos += 2;
+                continue;
+            }
+
+            pos += 2;
+            if (pos + 1 < data.length) {
+                const segLen = (data[pos] << 8) | data[pos + 1];
+                pos += segLen;
+            }
+        }
+
+        return -1;
+    }
+
+    static _skipEntropy(data, pos) {
+        while (pos < data.length - 1) {
+            if (data[pos] !== 0xFF) {
+                pos++;
+                continue;
+            }
+
+            const next = data[pos + 1];
+            if (next === 0x00) {
+                pos += 2;
+            } else if (next === 0xD9) {
+                return pos + 2;
+            } else if (next >= 0xD0 && next <= 0xD7) {
+                pos += 2;
+            } else {
+                return pos;
+            }
+        }
+
+        return -1;
     }
 }
 
@@ -149,7 +202,7 @@ class GIFGenerator {
             const gif = new GIF({
                 workers: 2,
                 workerScript: 'gif.worker.js',
-                quality: 10,
+                quality: 1,
             });
             
             const ctx = leftCanvas.getContext('2d');
@@ -174,8 +227,10 @@ class App {
         this.autoCrop = 0;
         this.currentCrop = 0;
         this.duration = 150;
-        this.generatedBlob = null;
         this.processor = new StereoProcessor();
+        this.previewAnimId = null;
+        this.previewFrame = 0;
+        this.previewLastSwitch = 0;
         
         this.initElements();
         this.bindEvents();
@@ -197,7 +252,6 @@ class App {
         this.durationSlider = document.getElementById('duration-slider');
         this.durationValue = document.getElementById('duration-value');
         this.generateBtn = document.getElementById('generate-btn');
-        this.downloadBtn = document.getElementById('download-btn');
         this.generating = document.getElementById('generating');
     }
 
@@ -225,16 +279,17 @@ class App {
         this.cropSlider.addEventListener('input', e => {
             this.currentCrop = parseInt(e.target.value);
             this.cropValue.textContent = this.currentCrop;
+            this.generateBtn.textContent = 'Generate & Download GIF';
             this.updatePreview();
         });
         
         this.durationSlider.addEventListener('input', e => {
             this.duration = parseInt(e.target.value);
             this.durationValue.textContent = this.duration;
+            this.generateBtn.textContent = 'Generate & Download GIF';
         });
         
         this.generateBtn.addEventListener('click', () => this.generateGIF());
-        this.downloadBtn.addEventListener('click', () => this.downloadGIF());
     }
 
     async handleFile(file) {
@@ -271,8 +326,6 @@ class App {
             
             this.hideLoading();
             this.workspace.classList.remove('hidden');
-            this.downloadBtn.disabled = true;
-            this.generatedBlob = null;
             
         } catch (error) {
             console.error(error);
@@ -314,18 +367,40 @@ class App {
     }
 
     updatePreview() {
+        if (this.previewAnimId) {
+            cancelAnimationFrame(this.previewAnimId);
+            this.previewAnimId = null;
+        }
+
         const w = this.leftImg.width;
         const h = this.leftImg.height;
         const crop = this.currentCrop;
-        
         const croppedW = w - crop;
-        
+
         this.previewCanvas.width = croppedW;
         this.previewCanvas.height = h;
-        
+
         const ctx = this.previewCanvas.getContext('2d');
-        
-        ctx.drawImage(this.leftImg, 0, 0, croppedW, h, 0, 0, croppedW, h);
+        this.previewFrame = 0;
+        this.previewLastSwitch = 0;
+
+        const animate = (timestamp) => {
+            if (!this.previewLastSwitch || timestamp - this.previewLastSwitch >= this.duration) {
+                this.previewFrame = 1 - this.previewFrame;
+                this.previewLastSwitch = timestamp;
+
+                ctx.clearRect(0, 0, croppedW, h);
+                if (this.previewFrame === 0) {
+                    ctx.drawImage(this.leftImg, 0, 0, croppedW, h, 0, 0, croppedW, h);
+                } else {
+                    ctx.drawImage(this.rightImg, crop, 0, croppedW, h, 0, 0, croppedW, h);
+                }
+            }
+
+            this.previewAnimId = requestAnimationFrame(animate);
+        };
+
+        this.previewAnimId = requestAnimationFrame(animate);
     }
 
     async generateGIF() {
@@ -351,9 +426,15 @@ class App {
             ctx1.drawImage(this.leftImg, 0, 0, croppedW, h, 0, 0, croppedW, h);
             ctx2.drawImage(this.rightImg, crop, 0, croppedW, h, 0, 0, croppedW, h);
             
-            this.generatedBlob = await GIFGenerator.generate(tempCanvas1, tempCanvas2, this.duration);
+            const blob = await GIFGenerator.generate(tempCanvas1, tempCanvas2, this.duration);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'wiggle.gif';
+            a.click();
+            URL.revokeObjectURL(url);
             
-            this.downloadBtn.disabled = false;
+            this.generateBtn.textContent = 'GIF Downloaded! Generate Again';
         } catch (error) {
             console.error(error);
             alert('Error generating GIF: ' + error.message);
@@ -361,17 +442,6 @@ class App {
             this.generating.classList.add('hidden');
             this.generateBtn.disabled = false;
         }
-    }
-
-    downloadGIF() {
-        if (!this.generatedBlob) return;
-        
-        const url = URL.createObjectURL(this.generatedBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'wiggle.gif';
-        a.click();
-        URL.revokeObjectURL(url);
     }
 
     showLoading(status) {
