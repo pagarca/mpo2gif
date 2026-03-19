@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MPO to GIF - Convert 3DS Stereo Photos</title>
+    <link rel="stylesheet" href="style.css">
+    <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady()"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>MPO → GIF</h1>
+            <p class="subtitle">Convert Nintendo 3DS stereo photos to wiggle GIFs</p>
+        </header>
+
+        <div id="upload-area" class="upload-area">
+            <input type="file" id="file-input" accept=".MPO,.mpo" hidden>
+            <div class="upload-content">
+                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5h3v7h4v-7h3l-5-5z"/>
+                </svg>
+                <p class="upload-text">Drop your <strong>.MPO</strong> file here</p>
+                <p class="upload-subtext">or click to browse</p>
+            </div>
+        </div>
+
+        <div id="loading-opencv" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Loading image processor...</p>
+        </div>
+
+        <div id="processing" class="loading hidden">
+            <div class="spinner"></div>
+            <p id="processing-status">Processing...</p>
+        </div>
+
+        <div id="workspace" class="workspace hidden">
+            <div class="frames-container">
+                <div class="frame-box">
+                    <h3>Left Eye</h3>
+                    <canvas id="left-canvas"></canvas>
+                </div>
+                <div class="frame-box">
+                    <h3>Right Eye</h3>
+                    <canvas id="right-canvas"></canvas>
+                </div>
+            </div>
+
+            <div class="preview-section">
+                <h3>Preview</h3>
+                <canvas id="preview-canvas"></canvas>
+            </div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <label for="crop-slider">
+                        Crop offset: <span id="crop-value">0</span>px
+                        <span class="auto-hint">(auto: <span id="auto-crop-value">--</span>)</span>
+                    </label>
+                    <input type="range" id="crop-slider" min="0" max="200" value="0" step="5">
+                </div>
+
+                <div class="control-group">
+                    <label for="duration-slider">
+                        Frame duration: <span id="duration-value">150</span>ms
+                    </label>
+                    <input type="range" id="duration-slider" min="50" max="500" value="150" step="10">
+                </div>
+
+                <div class="buttons">
+                    <button id="generate-btn" class="btn btn-primary">Generate GIF</button>
+                    <button id="download-btn" class="btn btn-secondary" disabled>Download GIF</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="generating" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Generating GIF...</p>
+        </div>
+
+        <footer>
+            <p>All processing happens in your browser. No data is uploaded to any server.</p>
+            <p><a href="https://github.com/YOUR_USERNAME/mpo2gif" target="_blank">View on GitHub</a></p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

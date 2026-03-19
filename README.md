@@ -12,7 +12,19 @@ It also **auto-detects the optimal stereo offset** per image using ORB feature m
 
 | Original (MPO) | Generated wiggle GIF |
 |:---:|:---:|
-| <img src="examples/HNI_0039.JPG" height="250"> | <img src="examples/HNI_0039.gif" height="250"> |
+| <img src="examples/HNI_0039.JPG" width="250"> | <img src="examples/HNI_0039.gif" width="250"> |
+
+## Web Version
+
+Try it online: **[https://YOUR_USERNAME.github.io/mpo2gif/](https://YOUR_USERNAME.github.io/mpo2gif/)**
+
+Upload your 3DS MPO files and get wiggle GIFs directly in your browser. No data leaves your device — everything is processed client-side.
+
+Features:
+- 🖼️ Auto-crop using OpenCV.js feature matching
+- 🎚️ Real-time preview with adjustable sliders
+- ⚡ Fast client-side GIF generation
+- 🔒 Privacy-first: all processing happens locally
 
 ## Installation
 
