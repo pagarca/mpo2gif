@@ -37,47 +37,51 @@
         </div>
 
         <div id="workspace" class="workspace hidden">
+            <div class="workspace-header">
+                <div class="rotation-controls">
+                    <span class="control-label">Rotate:</span>
+                    <button id="rot-cw" class="btn btn-small" title="Rotate 90° CW">90° CW</button>
+                    <button id="rot-ccw" class="btn btn-small" title="Rotate 90° CCW">90° CCW</button>
+                    <button id="rot-180" class="btn btn-small" title="Rotate 180°">180°</button>
+                    <button id="rot-reset" class="btn btn-small" title="Reset rotation">Reset</button>
+                </div>
+                <div class="slider-controls">
+                    <label for="duration-slider">
+                        Speed: <span id="duration-value">150</span>ms
+                    </label>
+                    <input type="range" id="duration-slider" min="50" max="500" value="150" step="10">
+                </div>
+            </div>
+
             <div class="frames-container">
                 <div class="frame-box">
-                    <h3>Left Eye</h3>
+                    <h3>Left Eye <span class="hint">(click to set focal point)</span></h3>
                     <canvas id="left-canvas"></canvas>
                 </div>
                 <div class="frame-box">
-                    <h3>Right Eye</h3>
+                    <h3>Right Eye <span class="hint">(auto-matched)</span></h3>
                     <canvas id="right-canvas"></canvas>
                 </div>
             </div>
 
+            <div class="info-bar">
+                <span id="focal-info">Click on the left image to set the focal point</span>
+            </div>
+
             <div class="preview-section">
-                <h3>Preview</h3>
+                <h3>Preview <span id="preview-status"></span></h3>
                 <canvas id="preview-canvas"></canvas>
             </div>
 
-            <div class="controls">
-                <div class="control-group">
-                    <label for="crop-slider">
-                        Crop offset: <span id="crop-value">0</span>px
-                        <span class="auto-hint">(auto: <span id="auto-crop-value">--</span>)</span>
-                    </label>
-                    <input type="range" id="crop-slider" min="0" max="200" value="0" step="5">
-                </div>
-
-                <div class="control-group">
-                    <label for="duration-slider">
-                        Frame duration: <span id="duration-value">150</span>ms
-                    </label>
-                    <input type="range" id="duration-slider" min="50" max="500" value="150" step="10">
-                </div>
-
-                <div class="buttons">
-                    <button id="generate-btn" class="btn btn-primary">Generate &amp; Download GIF</button>
-                </div>
+            <div class="buttons">
+                <button id="generate-btn" class="btn btn-primary">Generate &amp; Download GIF</button>
+                <button id="generate-mp4-btn" class="btn btn-secondary">Generate &amp; Download MP4</button>
             </div>
         </div>
 
         <div id="generating" class="loading hidden">
             <div class="spinner"></div>
-            <p>Generating GIF...</p>
+            <p id="generating-status">Generating GIF...</p>
         </div>
 
         <footer>

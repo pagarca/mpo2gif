@@ -102,7 +102,7 @@ class StereoProcessor {
         this.cvReady = false;
     }
 
-    async waitForOpenCV(timeout = 60000) {
+    async waitForOpenCv(timeout = 60000) {
         if (this.cvReady) return true;
 
         await new Promise((resolve, reject) => {
@@ -122,13 +122,85 @@ class StereoProcessor {
         return true;
     }
 
-    async findOptimalCrop(leftImg, rightImg) {
-        await this.waitForOpenCV();
+    async findMatchingPoint(leftCanvas, rightCanvas, point, windowSize = 40, searchRadius = 150) {
+        await this.waitForOpenCv();
         
         const cv = window.cv;
         
-        const leftMat = cv.imread(leftImg);
-        const rightMat = cv.imread(rightImg);
+        const leftMat = cv.imread(leftCanvas);
+        const rightMat = cv.imread(rightCanvas);
+        
+        const leftGray = new cv.Mat();
+        const rightGray = new cv.Mat();
+        cv.cvtColor(leftMat, leftGray, cv.COLOR_RGBA2GRAY);
+        cv.cvtColor(rightMat, rightGray, cv.COLOR_RGBA2GRAY);
+        
+        const [px, py] = [Math.round(point.x), Math.round(point.y)];
+        const w = leftGray.cols;
+        const h = leftGray.rows;
+        
+        const x1 = Math.max(0, px - windowSize);
+        const y1 = Math.max(0, py - windowSize);
+        const x2 = Math.min(w, px + windowSize);
+        const y2 = Math.min(h, py + windowSize);
+        
+        if (x2 <= x1 || y2 <= y1) {
+            leftMat.delete();
+            rightMat.delete();
+            leftGray.delete();
+            rightGray.delete();
+            return point;
+        }
+        
+        const template = leftGray.roi(new cv.Rect(x1, y1, x2 - x1, y2 - y1));
+        
+        const sx1 = Math.max(0, px - searchRadius);
+        const sy1 = Math.max(0, py - searchRadius);
+        const sx2 = Math.min(w, px + searchRadius);
+        const sy2 = Math.min(h, py + searchRadius);
+        
+        if (sx2 <= sx1 || sy2 <= sy1 || sx2 - sx1 < x2 - x1 || sy2 - sy1 < y2 - y1) {
+            template.delete();
+            leftMat.delete();
+            rightMat.delete();
+            leftGray.delete();
+            rightGray.delete();
+            return point;
+        }
+        
+        const searchArea = rightGray.roi(new cv.Rect(sx1, sy1, sx2 - sx1, sy2 - sy1));
+        const result = new cv.Mat();
+        cv.matchTemplate(searchArea, template, result, cv.TM_CCOEFF_NORMED);
+        
+        const minMax = cv.minMaxLoc(result);
+        const maxVal = minMax.maxVal;
+        const maxLoc = minMax.maxLoc;
+        
+        template.delete();
+        searchArea.delete();
+        result.delete();
+        leftMat.delete();
+        rightMat.delete();
+        leftGray.delete();
+        rightGray.delete();
+        
+        if (maxVal < 0.3) {
+            return point;
+        }
+        
+        const matchX = maxLoc.x + sx1 + Math.floor((x2 - x1) / 2);
+        const matchY = maxLoc.y + sy1 + Math.floor((y2 - y1) / 2);
+        
+        return { x: matchX, y: matchY };
+    }
+
+    async findOptimalCrop(leftCanvas, rightCanvas) {
+        await this.waitForOpenCv();
+        
+        const cv = window.cv;
+        
+        const leftMat = cv.imread(leftCanvas);
+        const rightMat = cv.imread(rightCanvas);
         
         const leftGray = new cv.Mat();
         const rightGray = new cv.Mat();
@@ -201,22 +273,110 @@ class StereoProcessor {
     }
 }
 
+class ImageProcessor {
+    static shiftImage(imgData, shiftX, shiftY) {
+        const canvas = document.createElement('canvas');
+        canvas.width = imgData.width;
+        canvas.height = imgData.height;
+        const ctx = canvas.getContext('2d');
+        
+        ctx.drawImage(imgData, 0, 0);
+        
+        const srcData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const dstData = ctx.createImageData(canvas.width, canvas.height);
+        
+        for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+                const srcX = Math.max(0, Math.min(canvas.width - 1, x - shiftX));
+                const srcY = Math.max(0, Math.min(canvas.height - 1, y - shiftY));
+                
+                const dstIdx = (y * canvas.width + x) * 4;
+                const srcIdx = (srcY * canvas.width + srcX) * 4;
+                
+                dstData.data[dstIdx] = srcData.data[srcIdx];
+                dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
+                dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
+                dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
+            }
+        }
+        
+        ctx.putImageData(dstData, 0, 0);
+        return canvas;
+    }
+    
+    static rotateCanvas(canvas, angle) {
+        if (angle === 0) {
+            const copy = document.createElement('canvas');
+            copy.width = canvas.width;
+            copy.height = canvas.height;
+            copy.getContext('2d').drawImage(canvas, 0, 0);
+            return copy;
+        }
+        
+        const radians = angle * Math.PI / 180;
+        const sin = Math.abs(Math.sin(radians));
+        const cos = Math.abs(Math.cos(radians));
+        
+        const newWidth = Math.round(canvas.width * cos + canvas.height * sin);
+        const newHeight = Math.round(canvas.width * sin + canvas.height * cos);
+        
+        const rotated = document.createElement('canvas');
+        rotated.width = newWidth;
+        rotated.height = newHeight;
+        
+        const ctx = rotated.getContext('2d');
+        ctx.translate(newWidth / 2, newHeight / 2);
+        ctx.rotate(radians);
+        ctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+        
+        return rotated;
+    }
+    
+    static cropBorders(canvas, cropPx) {
+        if (cropPx <= 0) {
+            const copy = document.createElement('canvas');
+            copy.width = canvas.width;
+            copy.height = canvas.height;
+            copy.getContext('2d').drawImage(canvas, 0, 0);
+            return copy;
+        }
+        
+        const newWidth = canvas.width - 2 * cropPx;
+        const newHeight = canvas.height - 2 * cropPx;
+        
+        if (newWidth <= 0 || newHeight <= 0) {
+            return canvas;
+        }
+        
+        const cropped = document.createElement('canvas');
+        cropped.width = newWidth;
+        cropped.height = newHeight;
+        
+        cropped.getContext('2d').drawImage(
+            canvas, cropPx, cropPx, newWidth, newHeight,
+            0, 0, newWidth, newHeight
+        );
+        
+        return cropped;
+    }
+}
+
 class GIFGenerator {
-    static async generate(leftCanvas, rightCanvas, duration) {
+    static async generateFromFrames(leftCanvas, rightCanvas, duration) {
         return new Promise((resolve, reject) => {
             const gif = new GIF({
                 workers: 2,
                 workerScript: 'gif.worker.js',
-                quality: 1,
+                quality: 10,
             });
             
-            const ctx = leftCanvas.getContext('2d');
-            const imageData = ctx.getImageData(0, 0, leftCanvas.width, leftCanvas.height);
-            gif.addFrame(imageData, { delay: duration });
+            const ctx1 = leftCanvas.getContext('2d');
+            const imageData1 = ctx1.getImageData(0, 0, leftCanvas.width, leftCanvas.height);
+            gif.addFrame(imageData1, { delay: duration, copy: true });
             
             const ctx2 = rightCanvas.getContext('2d');
             const imageData2 = ctx2.getImageData(0, 0, rightCanvas.width, rightCanvas.height);
-            gif.addFrame(imageData2, { delay: duration });
+            gif.addFrame(imageData2, { delay: duration, copy: true });
             
             gif.on('finished', blob => resolve(blob));
             gif.on('error', reject);
@@ -225,17 +385,76 @@ class GIFGenerator {
     }
 }
 
+class MP4Generator {
+    static async generate(frames, duration, lengthSeconds = 5) {
+        const fps = Math.round(1000 / duration);
+        const totalFrames = fps * lengthSeconds;
+        
+        const canvasFrames = [];
+        
+        for (let i = 0; i < totalFrames; i++) {
+            const isLeft = i % 2 === 0;
+            const srcCanvas = isLeft ? frames.left : frames.right;
+            
+            const frameCanvas = document.createElement('canvas');
+            frameCanvas.width = srcCanvas.width;
+            frameCanvas.height = srcCanvas.height;
+            frameCanvas.getContext('2d').drawImage(srcCanvas, 0, 0);
+            
+            canvasFrames.push(frameCanvas);
+        }
+        
+        return new Promise((resolve, reject) => {
+            const stream = canvasFrames[0].captureStream(fps);
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm;codecs=vp9',
+                videoBitsPerSecond: 5000000
+            });
+            
+            const chunks = [];
+            mediaRecorder.ondataavailable = e => chunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                resolve(blob);
+            };
+            mediaRecorder.onerror = reject;
+            
+            mediaRecorder.start();
+            
+            let frameIndex = 0;
+            const frameInterval = setInterval(() => {
+                if (frameIndex >= canvasFrames.length) {
+                    clearInterval(frameInterval);
+                    mediaRecorder.stop();
+                    return;
+                }
+                
+                stream.getVideoTracks()[0].requestFrame();
+                frameIndex++;
+            }, 1000 / fps);
+        });
+    }
+}
+
 class App {
     constructor() {
+        this.leftOrig = null;
+        this.rightOrig = null;
         this.leftImg = null;
         this.rightImg = null;
-        this.autoCrop = 0;
-        this.currentCrop = 0;
+        this.leftAligned = null;
+        this.rightAligned = null;
+        this.rotation = 0;
+        this.focalLeft = null;
+        this.focalRight = null;
+        this.halfDx = 0;
+        this.halfDy = 0;
         this.duration = 150;
         this.processor = new StereoProcessor();
         this.previewAnimId = null;
         this.previewFrame = 0;
         this.previewLastSwitch = 0;
+        this.isProcessing = false;
         
         this.initElements();
         this.bindEvents();
@@ -251,13 +470,14 @@ class App {
         this.leftCanvas = document.getElementById('left-canvas');
         this.rightCanvas = document.getElementById('right-canvas');
         this.previewCanvas = document.getElementById('preview-canvas');
-        this.cropSlider = document.getElementById('crop-slider');
-        this.cropValue = document.getElementById('crop-value');
-        this.autoCropValue = document.getElementById('auto-crop-value');
+        this.focalInfo = document.getElementById('focal-info');
+        this.previewStatus = document.getElementById('preview-status');
         this.durationSlider = document.getElementById('duration-slider');
         this.durationValue = document.getElementById('duration-value');
         this.generateBtn = document.getElementById('generate-btn');
+        this.generateMp4Btn = document.getElementById('generate-mp4-btn');
         this.generating = document.getElementById('generating');
+        this.generatingStatus = document.getElementById('generating-status');
     }
 
     bindEvents() {
@@ -281,20 +501,21 @@ class App {
             if (file) this.handleFile(file);
         });
         
-        this.cropSlider.addEventListener('input', e => {
-            this.currentCrop = parseInt(e.target.value);
-            this.cropValue.textContent = this.currentCrop;
-            this.generateBtn.textContent = 'Generate & Download GIF';
-            this.updatePreview();
-        });
+        this.leftCanvas.addEventListener('click', e => this.onLeftClick(e));
         
         this.durationSlider.addEventListener('input', e => {
             this.duration = parseInt(e.target.value);
             this.durationValue.textContent = this.duration;
-            this.generateBtn.textContent = 'Generate & Download GIF';
+            this.resetGenerateButtons();
         });
         
+        document.getElementById('rot-cw').addEventListener('click', () => this.rotate(270));
+        document.getElementById('rot-ccw').addEventListener('click', () => this.rotate(90));
+        document.getElementById('rot-180').addEventListener('click', () => this.rotate(180));
+        document.getElementById('rot-reset').addEventListener('click', () => this.rotate(0));
+        
         this.generateBtn.addEventListener('click', () => this.generateGIF());
+        this.generateMp4Btn.addEventListener('click', () => this.generateMP4());
     }
 
     async handleFile(file) {
@@ -303,6 +524,7 @@ class App {
             return;
         }
         
+        this.resetState();
         this.showLoading('Loading...');
         
         try {
@@ -319,15 +541,7 @@ class App {
             
             await this.loadFrames(frames);
             
-            this.showLoading('Analyzing stereo offset...');
-            this.autoCrop = await this.processor.findOptimalCrop(this.leftCanvas, this.rightCanvas);
-            this.autoCropValue.textContent = this.autoCrop;
-            
-            this.currentCrop = this.autoCrop;
-            this.cropSlider.value = this.currentCrop;
-            this.cropValue.textContent = this.currentCrop;
-            
-            this.updatePreview();
+            this.updateDisplay();
             
             this.hideLoading();
             this.workspace.classList.remove('hidden');
@@ -339,10 +553,30 @@ class App {
         }
     }
 
+    resetState() {
+        this.leftOrig = null;
+        this.rightOrig = null;
+        this.leftImg = null;
+        this.rightImg = null;
+        this.leftAligned = null;
+        this.rightAligned = null;
+        this.rotation = 0;
+        this.focalLeft = null;
+        this.focalRight = null;
+        this.halfDx = 0;
+        this.halfDy = 0;
+        this.previewFrame = 0;
+        this.previewLastSwitch = 0;
+        if (this.previewAnimId) {
+            cancelAnimationFrame(this.previewAnimId);
+            this.previewAnimId = null;
+        }
+    }
+
     async loadFrames(frames) {
         return new Promise((resolve, reject) => {
-            this.leftImg = new Image();
-            this.rightImg = new Image();
+            const leftImg = new Image();
+            const rightImg = new Image();
             
             let loaded = 0;
             const checkLoaded = () => {
@@ -350,25 +584,160 @@ class App {
                 if (loaded === 2) resolve();
             };
             
-            this.leftImg.onload = () => {
-                this.leftCanvas.width = this.leftImg.width;
-                this.leftCanvas.height = this.leftImg.height;
-                this.leftCanvas.getContext('2d').drawImage(this.leftImg, 0, 0);
+            leftImg.onload = () => {
+                this.leftOrig = leftImg;
+                this.leftImg = leftImg;
+                this.leftCanvas.width = leftImg.naturalWidth || leftImg.width;
+                this.leftCanvas.height = leftImg.naturalHeight || leftImg.height;
+                const ctx = this.leftCanvas.getContext('2d');
+                ctx.drawImage(leftImg, 0, 0);
                 checkLoaded();
             };
             
-            this.rightImg.onload = () => {
-                this.rightCanvas.width = this.rightImg.width;
-                this.rightCanvas.height = this.rightImg.height;
-                this.rightCanvas.getContext('2d').drawImage(this.rightImg, 0, 0);
+            rightImg.onload = () => {
+                this.rightOrig = rightImg;
+                this.rightImg = rightImg;
+                this.rightCanvas.width = rightImg.naturalWidth || rightImg.width;
+                this.rightCanvas.height = rightImg.naturalHeight || rightImg.height;
+                const ctx = this.rightCanvas.getContext('2d');
+                ctx.drawImage(rightImg, 0, 0);
                 checkLoaded();
             };
             
-            this.leftImg.onerror = this.rightImg.onerror = reject;
+            leftImg.onerror = rightImg.onerror = reject;
             
-            this.leftImg.src = URL.createObjectURL(frames[0]);
-            this.rightImg.src = URL.createObjectURL(frames[1]);
+            leftImg.src = URL.createObjectURL(frames[0]);
+            rightImg.src = URL.createObjectURL(frames[1]);
         });
+    }
+
+    rotate(angle) {
+        if (!this.leftOrig || !this.rightOrig) return;
+        
+        if (angle === 0) {
+            this.rotation = 0;
+        } else {
+            this.rotation = (this.rotation + angle) % 360;
+        }
+        
+        this.leftImg = ImageProcessor.rotateCanvas(this.leftOrig, this.rotation);
+        this.rightImg = ImageProcessor.rotateCanvas(this.rightOrig, this.rotation);
+        
+        this.leftCanvas.width = this.leftImg.width;
+        this.leftCanvas.height = this.leftImg.height;
+        this.rightCanvas.width = this.rightImg.width;
+        this.rightCanvas.height = this.rightImg.height;
+        
+        this.focalLeft = null;
+        this.focalRight = null;
+        this.leftAligned = null;
+        this.rightAligned = null;
+        
+        this.focalInfo.textContent = 'Click on the left image to set the focal point';
+        this.updateDisplay();
+    }
+
+    async onLeftClick(event) {
+        if (!this.leftImg || !this.rightImg || this.isProcessing) return;
+        
+        const rect = this.leftCanvas.getBoundingClientRect();
+        const canvasX = event.clientX - rect.left;
+        const canvasY = event.clientY - rect.top;
+        
+        const cw = this.leftCanvas.width;
+        const ch = this.leftCanvas.height;
+        
+        if (cw <= 0 || ch <= 0) return;
+        
+        const cssScaleX = rect.width / cw;
+        const cssScaleY = rect.height / ch;
+        
+        const imgX = canvasX / cssScaleX;
+        const imgY = canvasY / cssScaleY;
+        
+        if (imgX < 0 || imgX >= cw || imgY < 0 || imgY >= ch) return;
+        
+        this.isProcessing = true;
+        this.focalInfo.textContent = `Finding match for (${Math.round(imgX)}, ${Math.round(imgY)})...`;
+        
+        try {
+            const focalLeft = { x: Math.round(imgX), y: Math.round(imgY) };
+            
+            const focalRight = await this.processor.findMatchingPoint(
+                this.leftCanvas, this.rightCanvas, focalLeft
+            );
+            
+            this.focalLeft = focalLeft;
+            this.focalRight = focalRight;
+            
+            const dx = this.focalLeft.x - this.focalRight.x;
+            const dy = this.focalLeft.y - this.focalRight.y;
+            
+            this.halfDx = Math.round(dx / 2);
+            this.halfDy = Math.round(dy / 2);
+            
+            const leftShifted = ImageProcessor.shiftImage(this.leftImg, -this.halfDx, -this.halfDy);
+            const rightShifted = ImageProcessor.shiftImage(this.rightImg, this.halfDx, this.halfDy);
+            
+            const cropPx = Math.max(Math.abs(this.halfDx), Math.abs(this.halfDy));
+            this.leftAligned = ImageProcessor.cropBorders(leftShifted, cropPx);
+            this.rightAligned = ImageProcessor.cropBorders(rightShifted, cropPx);
+            
+            this.focalInfo.textContent = 
+                `Focal: (${this.focalLeft.x}, ${this.focalLeft.y}) → (${this.focalRight.x}, ${this.focalRight.y}) | Disparity: dx=${dx}, dy=${dy}`;
+            
+            this.updateDisplay();
+            
+        } catch (error) {
+            console.error(error);
+            this.focalInfo.textContent = 'Error finding match. Click again.';
+        }
+        
+        this.isProcessing = false;
+    }
+
+    updateDisplay() {
+        if (!this.leftImg || !this.rightImg) return;
+        
+        this.drawCanvasWithMarker(this.leftCanvas, this.leftImg, this.focalLeft);
+        this.drawCanvasWithMarker(this.rightCanvas, this.rightImg, this.focalRight);
+        this.updatePreview();
+    }
+
+    drawCanvasWithMarker(canvas, img, markerPt) {
+        const cw = canvas.width;
+        const ch = canvas.height;
+        const iw = img.width;
+        const ih = img.height;
+        
+        if (cw <= 1 || ch <= 1 || iw <= 0 || ih <= 0) return;
+        
+        const mainCtx = canvas.getContext('2d');
+        mainCtx.clearRect(0, 0, cw, ch);
+        mainCtx.drawImage(img, 0, 0);
+        
+        if (markerPt) {
+            const mx = markerPt.x;
+            const my = markerPt.y;
+            const r = 12;
+            
+            mainCtx.strokeStyle = '#FF0000';
+            mainCtx.lineWidth = 3;
+            
+            mainCtx.beginPath();
+            mainCtx.moveTo(mx - r, my);
+            mainCtx.lineTo(mx + r, my);
+            mainCtx.stroke();
+            
+            mainCtx.beginPath();
+            mainCtx.moveTo(mx, my - r);
+            mainCtx.lineTo(mx, my + r);
+            mainCtx.stroke();
+            
+            mainCtx.beginPath();
+            mainCtx.ellipse(mx, my, r / 2, r / 2, 0, 0, Math.PI * 2);
+            mainCtx.stroke();
+        }
     }
 
     updatePreview() {
@@ -376,62 +745,78 @@ class App {
             cancelAnimationFrame(this.previewAnimId);
             this.previewAnimId = null;
         }
-
-        const w = this.leftImg.width;
-        const h = this.leftImg.height;
-        const crop = this.currentCrop;
-        const croppedW = w - crop;
-
-        this.previewCanvas.width = croppedW;
+        
+        let leftFrame, rightFrame;
+        
+        if (this.focalLeft && this.leftAligned && this.rightAligned) {
+            leftFrame = this.leftAligned;
+            rightFrame = this.rightAligned;
+            this.previewStatus.textContent = '(focal point aligned)';
+        } else {
+            leftFrame = this.leftImg;
+            rightFrame = this.rightImg;
+            this.previewStatus.textContent = '';
+        }
+        
+        if (!leftFrame || !rightFrame) return;
+        
+        const w = leftFrame.width;
+        const h = leftFrame.height;
+        
+        if (w <= 0 || h <= 0) return;
+        
+        this.previewCanvas.width = w;
         this.previewCanvas.height = h;
-
+        
         const ctx = this.previewCanvas.getContext('2d');
         this.previewFrame = 0;
         this.previewLastSwitch = 0;
-
+        
+        const drawFrame = (frame) => {
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(frame, 0, 0);
+        };
+        
+        drawFrame(leftFrame);
+        
         const animate = (timestamp) => {
             if (!this.previewLastSwitch || timestamp - this.previewLastSwitch >= this.duration) {
                 this.previewFrame = 1 - this.previewFrame;
                 this.previewLastSwitch = timestamp;
-
-                ctx.clearRect(0, 0, croppedW, h);
-                if (this.previewFrame === 0) {
-                    ctx.drawImage(this.leftImg, 0, 0, croppedW, h, 0, 0, croppedW, h);
-                } else {
-                    ctx.drawImage(this.rightImg, crop, 0, croppedW, h, 0, 0, croppedW, h);
-                }
+                
+                const frame = this.previewFrame === 0 ? leftFrame : rightFrame;
+                drawFrame(frame);
             }
-
+            
             this.previewAnimId = requestAnimationFrame(animate);
         };
-
+        
         this.previewAnimId = requestAnimationFrame(animate);
+    }
+
+    getOutputFrames() {
+        if (this.focalLeft && this.leftAligned && this.rightAligned) {
+            return { left: this.leftAligned, right: this.rightAligned };
+        }
+        
+        return { left: this.leftImg, right: this.rightImg };
+    }
+
+    resetGenerateButtons() {
+        this.generateBtn.textContent = 'Generate & Download GIF';
+        this.generateMp4Btn.textContent = 'Generate & Download MP4';
     }
 
     async generateGIF() {
         this.generateBtn.disabled = true;
+        this.generateMp4Btn.disabled = true;
+        this.generatingStatus.textContent = 'Generating GIF...';
         this.generating.classList.remove('hidden');
         
         try {
-            const w = this.leftImg.width;
-            const h = this.leftImg.height;
-            const crop = this.currentCrop;
-            const croppedW = w - crop;
+            const frames = this.getOutputFrames();
+            const blob = await GIFGenerator.generateFromFrames(frames.left, frames.right, this.duration);
             
-            const tempCanvas1 = document.createElement('canvas');
-            const tempCanvas2 = document.createElement('canvas');
-            tempCanvas1.width = croppedW;
-            tempCanvas1.height = h;
-            tempCanvas2.width = croppedW;
-            tempCanvas2.height = h;
-            
-            const ctx1 = tempCanvas1.getContext('2d');
-            const ctx2 = tempCanvas2.getContext('2d');
-            
-            ctx1.drawImage(this.leftImg, 0, 0, croppedW, h, 0, 0, croppedW, h);
-            ctx2.drawImage(this.rightImg, crop, 0, croppedW, h, 0, 0, croppedW, h);
-            
-            const blob = await GIFGenerator.generate(tempCanvas1, tempCanvas2, this.duration);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -439,13 +824,44 @@ class App {
             a.click();
             URL.revokeObjectURL(url);
             
-            this.generateBtn.textContent = 'GIF Downloaded! Generate Again';
+            this.generateBtn.textContent = 'GIF Downloaded!';
         } catch (error) {
             console.error(error);
             alert('Error generating GIF: ' + error.message);
+            this.resetGenerateButtons();
         } finally {
             this.generating.classList.add('hidden');
             this.generateBtn.disabled = false;
+            this.generateMp4Btn.disabled = false;
+        }
+    }
+
+    async generateMP4() {
+        this.generateBtn.disabled = true;
+        this.generateMp4Btn.disabled = true;
+        this.generatingStatus.textContent = 'Generating MP4...';
+        this.generating.classList.remove('hidden');
+        
+        try {
+            const frames = this.getOutputFrames();
+            const blob = await MP4Generator.generate(frames, this.duration, 5);
+            
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'wiggle.webm';
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            this.generateMp4Btn.textContent = 'MP4 Downloaded!';
+        } catch (error) {
+            console.error(error);
+            alert('Error generating MP4: ' + error.message);
+            this.resetGenerateButtons();
+        } finally {
+            this.generating.classList.add('hidden');
+            this.generateBtn.disabled = false;
+            this.generateMp4Btn.disabled = false;
         }
     }
 
